@@ -177,6 +177,7 @@ class TestRULPredictor:
             loaded = RULPredictor.from_pretrained(tmpdir)
             assert loaded.input_size == self.model.input_size
             assert loaded.hidden_size == self.model.hidden_size
+            assert loaded.output_range == self.model.output_range
 
 
 class TestAsymmetricRULLoss:

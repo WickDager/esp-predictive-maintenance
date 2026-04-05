@@ -3,15 +3,9 @@ scripts/evaluate.py
 ====================
 Full evaluation suite for all trained ESP models.
 
-Evaluates:
-  - LSTM Autoencoder: AUC-ROC, AUC-PR, F1, lead time
-  - Transformer Autoencoder: same metrics
-  - RUL Predictor: RMSE, MAE, NASA Score, MC Dropout coverage
-  - Survival Analysis: Concordance index, hazard ratios
-
 Usage:
-    python scripts/evaluate.py --model lstm --data_path data/raw/synthetic_esp.csv
     python scripts/evaluate.py --model all --dataset synthetic
+    python scripts/evaluate.py --model lstm --data_path data/raw/synthetic_esp.csv
     python scripts/evaluate.py --model rul --dataset cmapss --cmapss_subset FD001
 """
 
@@ -24,21 +18,31 @@ import torch
 import numpy as np
 import pandas as pd
 from pathlib import Path
+from torch.utils.data import DataLoader
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.data.synthetic_generator import generate_esp_dataset, SYNTHETIC_SENSOR_COLS
-from src.data.loader import (
-    load_pump_sensor, load_cmapss,
-    _sliding_window, _compute_rul, _split_and_scale,
-    make_dataloaders,
+from src.data.synthetic_generator import (
+    generate_esp_dataset,
+    SYNTHETIC_SENSOR_COLS,
 )
-from src.models.lstm_autoencoder import LSTMAutoencoder, mc_dropout_anomaly_scores
+from src.data.loader import (
+    load_pump_sensor,
+    load_cmapss,
+    _sliding_window,
+    _compute_rul,
+    _split_and_scale,
+    TimeSeriesDataset,
+)
+from src.models.lstm_autoencoder import (
+    LSTMAutoencoder,
+    mc_dropout_anomaly_scores,
+)
 from src.models.transformer_model import TransformerAutoencoder
 from src.models.rul_predictor import RULPredictor, evaluate_rul
 from src.utils.metrics import (
-    anomaly_detection_metrics, rul_metrics,
-    early_detection_lead_time, print_metrics_table,
+    anomaly_detection_metrics,
+    print_metrics_table,
 )
 
 logging.basicConfig(
@@ -48,11 +52,15 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def load_data_for_eval(dataset: str, data_path: str, window_size: int = 50,
-                       step_size: int = 1, val_split: float = 0.15,
-                       test_split: float = 0.15, random_seed: int = 42,
-                       cmapss_subset: str = "FD001", data_dir: str = None):
-    """Load data for evaluation, matching the training format."""
+def load_yaml(path):
+    with open(path) as f:
+        return __import__("yaml").safe_load(f)
+
+
+def load_data_for_eval(dataset, data_path, window_size=50, step_size=1,
+                       val_split=0.15, test_split=0.15, random_seed=42,
+                       cmapss_subset="FD001", data_dir=None):
+    """Load data for evaluation."""
     if dataset == "synthetic":
         if data_path:
             df = pd.read_csv(data_path, parse_dates=["timestamp"])
@@ -66,12 +74,12 @@ def load_data_for_eval(dataset: str, data_path: str, window_size: int = 50,
         X_raw = df[SYNTHETIC_SENSOR_COLS].values.astype(np.float32)
         y_raw = df["failure"].values.astype(np.float32)
         rul_raw = rul_series.astype(np.float32)
-        X_windows, y_windows, rul_windows = _sliding_window(
+        X_w, y_w, rul_w = _sliding_window(
             X_raw, y_raw, rul_raw,
             window_size=window_size, step_size=step_size,
         )
         return _split_and_scale(
-            X_windows, y_windows, rul_windows, SYNTHETIC_SENSOR_COLS,
+            X_w, y_w, rul_w, SYNTHETIC_SENSOR_COLS,
             val_split=val_split, test_split=test_split,
             random_seed=random_seed,
         )
@@ -90,10 +98,10 @@ def load_data_for_eval(dataset: str, data_path: str, window_size: int = 50,
             val_split=val_split, random_seed=random_seed,
         )
     else:
-        raise ValueError(f"Unknown dataset: {dataset}")
+        raise ValueError("Unknown dataset: %s" % dataset)
 
 
-def evaluate_autoencoder(model, test_loader, device, data, model_name="Model"):
+def evaluate_autoencoder(model, test_loader, device, model_name="Model"):
     """Evaluate an autoencoder on test data."""
     model.eval()
     model = model.to(device)
@@ -113,26 +121,25 @@ def evaluate_autoencoder(model, test_loader, device, data, model_name="Model"):
     all_labels = np.concatenate(all_labels)
 
     metrics = anomaly_detection_metrics(all_labels, all_scores)
-    logger.info(f"\n{'='*60}")
-    logger.info(f"{model_name} — Anomaly Detection Metrics")
-    logger.info(f"{'='*60}")
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("%s - Anomaly Detection Metrics", model_name)
+    logger.info("=" * 60)
     for k, v in metrics.items():
-        logger.info(f"  {k:25s}: {v:.4f}")
+        logger.info("  %-25s: %.4f", k, v)
 
-    # MC Dropout evaluation
-    logger.info(f"\nRunning MC Dropout uncertainty analysis (50 samples)...")
-    # Gather all test data
+    # MC Dropout
+    logger.info("")
+    logger.info("Running MC Dropout uncertainty analysis (50 samples)...")
     all_X = []
     for batch in test_loader:
         all_X.append(batch["X"])
     X_all = torch.cat(all_X, dim=0).to(device)
 
     mc_mean, mc_std, _ = mc_dropout_anomaly_scores(model, X_all, n_samples=50)
-
-    # Uncertainty quality: average coefficient of variation
     cv = (mc_std / (mc_mean + 1e-8)).mean()
-    logger.info(f"  Avg MC std (uncertainty): {mc_std.mean():.6f}")
-    logger.info(f"  Avg CV: {cv:.4f}")
+    logger.info("  Avg MC std (uncertainty): %.6f", mc_std.mean())
+    logger.info("  Avg CV: %.4f", cv)
 
     return metrics
 
@@ -143,14 +150,16 @@ def evaluate_rul_model(model, test_loader, device, model_name="RUL Predictor"):
     model = model.to(device)
 
     test_metrics = evaluate_rul(model, test_loader, device)
-    logger.info(f"\n{'='*60}")
-    logger.info(f"{model_name} — RUL Prediction Metrics")
-    logger.info(f"{'='*60}")
+    logger.info("")
+    logger.info("=" * 60)
+    logger.info("%s - RUL Prediction Metrics", model_name)
+    logger.info("=" * 60)
     for k, v in test_metrics.items():
-        logger.info(f"  {k:25s}: {v:.4f}")
+        logger.info("  %-25s: %.4f", k, v)
 
     # MC Dropout
-    logger.info(f"\nRunning MC Dropout uncertainty analysis (50 samples)...")
+    logger.info("")
+    logger.info("Running MC Dropout uncertainty analysis (50 samples)...")
     all_mc_mean = []
     all_mc_std = []
     all_targets = []
@@ -171,15 +180,14 @@ def evaluate_rul_model(model, test_loader, device, model_name="RUL Predictor"):
         mc_std = np.concatenate(all_mc_std)
         targets = np.concatenate(all_targets)
 
-        # 90% CI coverage
-        in_ci = (targets >= mc_mean - 1.645 * mc_std) & \
-                (targets <= mc_mean + 1.645 * mc_std)
+        in_ci = ((targets >= mc_mean - 1.645 * mc_std)
+                 & (targets <= mc_mean + 1.645 * mc_std))
         coverage = in_ci.mean()
         avg_width = (2 * 1.645 * mc_std).mean()
 
-        logger.info(f"  Avg MC std: {mc_std.mean():.2f}")
-        logger.info(f"  90% CI avg width: {avg_width:.2f}")
-        logger.info(f"  90% CI coverage: {coverage:.1%}")
+        logger.info("  Avg MC std: %.2f", mc_std.mean())
+        logger.info("  90%% CI avg width: %.2f", avg_width)
+        logger.info("  90%% CI coverage: %.1f%%", coverage * 100)
 
     return test_metrics
 
@@ -187,28 +195,26 @@ def evaluate_rul_model(model, test_loader, device, model_name="RUL Predictor"):
 def main():
     parser = argparse.ArgumentParser(description="Evaluate ESP models")
     parser.add_argument("--model", choices=["lstm", "transformer", "rul", "all"],
-                        default="all", help="Model(s) to evaluate")
-    parser.add_argument("--dataset", choices=["pump_sensor", "cmapss", "synthetic"],
-                        default="synthetic", help="Dataset")
-    parser.add_argument("--data_path", default=None, help="Direct CSV path")
-    parser.add_argument("--data_dir", default=None, help="Data directory (CMAPSS)")
+                        default="all")
+    parser.add_argument("--dataset",
+                        choices=["pump_sensor", "cmapss", "synthetic"],
+                        default="synthetic")
+    parser.add_argument("--data_path", default=None)
+    parser.add_argument("--data_dir", default=None)
     parser.add_argument("--cmapss_subset", default="FD001")
     parser.add_argument("--device", default=None)
-    parser.add_argument("--results_dir", default="results",
-                        help="Directory to save evaluation results")
+    parser.add_argument("--results_dir", default="results")
     args = parser.parse_args()
 
-    # Device
-    if args.device:
-        device = torch.device(args.device)
-    else:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Using device: {device}")
+    device = torch.device(args.device) if args.device else (
+        torch.device("cuda") if torch.cuda.is_available()
+        else torch.device("cpu")
+    )
+    logger.info("Using device: %s", device)
 
     os.makedirs(args.results_dir, exist_ok=True)
 
-    # Load data
-    logger.info(f"Loading {args.dataset} data...")
+    logger.info("Loading %s data...", args.dataset)
     data = load_data_for_eval(
         dataset=args.dataset,
         data_path=args.data_path,
@@ -216,8 +222,10 @@ def main():
         data_dir=args.data_dir,
     )
 
-    _, _, test_loader = make_dataloaders(
-        data, batch_size=128, num_workers=0, include_rul=True,
+    test_loader = DataLoader(
+        TimeSeriesDataset(data["X_test"], data["y_test"],
+                          data.get("rul_test")),
+        batch_size=128, shuffle=False,
     )
 
     all_metrics = {}
@@ -225,54 +233,58 @@ def main():
     # ── LSTM Autoencoder ──────────────────────────────────────────
     if args.model in ("lstm", "all"):
         lstm_path = "checkpoints/lstm_ae"
-        if os.path.exists(os.path.join(lstm_path, "pytorch_model.bin")):
+        ckpt = os.path.join(lstm_path, "pytorch_model.bin")
+        if os.path.exists(ckpt):
             logger.info("Loading LSTM Autoencoder...")
-            lstm_model = LSTMAutoencoder.from_pretrained(lstm_path, device=str(device))
+            lstm_model = LSTMAutoencoder.from_pretrained(lstm_path,
+                                                         device=str(device))
             metrics = evaluate_autoencoder(
-                lstm_model, test_loader, device, data,
+                lstm_model, test_loader, device,
                 model_name="LSTM Autoencoder",
             )
             all_metrics["LSTM Autoencoder"] = metrics
         else:
-            logger.warning(f"No LSTM checkpoint found at {lstm_path}, skipping.")
+            logger.warning("No LSTM checkpoint found at %s, skipping.", lstm_path)
 
     # ── Transformer Autoencoder ───────────────────────────────────
     if args.model in ("transformer", "all"):
-        transformer_path = "checkpoints/transformer_ae"
-        if os.path.exists(os.path.join(transformer_path, "pytorch_model.bin")):
+        tf_path = "checkpoints/transformer_ae"
+        ckpt = os.path.join(tf_path, "pytorch_model.bin")
+        if os.path.exists(ckpt):
             logger.info("Loading Transformer Autoencoder...")
             tf_model = TransformerAutoencoder.from_pretrained(
-                transformer_path, device=str(device)
+                tf_path, device=str(device),
             )
             metrics = evaluate_autoencoder(
-                tf_model, test_loader, device, data,
+                tf_model, test_loader, device,
                 model_name="Transformer Autoencoder",
             )
             all_metrics["Transformer Autoencoder"] = metrics
         else:
-            logger.warning(f"No Transformer checkpoint found at {transformer_path}, skipping.")
+            logger.warning("No Transformer checkpoint found at %s, skipping.",
+                           tf_path)
 
     # ── RUL Predictor ─────────────────────────────────────────────
     if args.model in ("rul", "all"):
         rul_path = "checkpoints/rul"
-        if os.path.exists(os.path.join(rul_path, "pytorch_model.bin")):
+        ckpt = os.path.join(rul_path, "pytorch_model.bin")
+        if os.path.exists(ckpt):
             logger.info("Loading RUL Predictor...")
-            rul_model = RULPredictor.from_pretrained(rul_path, device=str(device))
+            rul_model = RULPredictor.from_pretrained(rul_path,
+                                                     device=str(device))
             metrics = evaluate_rul_model(
                 rul_model, test_loader, device,
                 model_name="RUL Predictor",
             )
             all_metrics["RUL Predictor"] = metrics
         else:
-            logger.warning(f"No RUL checkpoint found at {rul_path}, skipping.")
+            logger.warning("No RUL checkpoint found at %s, skipping.", rul_path)
 
     # ── Print summary ─────────────────────────────────────────────
     if all_metrics:
         print_metrics_table(all_metrics)
 
-        # Save to JSON
         results_path = os.path.join(args.results_dir, "evaluation_results.json")
-        # Convert numpy types for JSON serialization
         serializable = {}
         for model_name, m in all_metrics.items():
             serializable[model_name] = {
@@ -281,7 +293,8 @@ def main():
             }
         with open(results_path, "w") as f:
             json.dump(serializable, f, indent=2)
-        logger.info(f"\nResults saved to {results_path}")
+        logger.info("")
+        logger.info("Results saved to %s", results_path)
     else:
         logger.warning("No models were evaluated (no checkpoints found).")
 

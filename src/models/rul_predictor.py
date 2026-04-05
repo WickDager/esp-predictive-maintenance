@@ -188,6 +188,8 @@ class RULPredictor(nn.Module):
             "model_type": "RULPredictor",
             "input_size": self.input_size,
             "hidden_size": self.hidden_size,
+            "num_layers": self.lstm.num_layers,
+            "dropout": self.dropout.p,
             "output_range": list(self.output_range) if self.output_range else None,
         }
 
@@ -204,6 +206,8 @@ class RULPredictor(nn.Module):
         model = cls(
             input_size=config["input_size"],
             hidden_size=config["hidden_size"],
+            num_layers=config.get("num_layers", 3),
+            dropout=config.get("dropout", 0.3),
             output_range=config.get("output_range"),
         )
         model.load_state_dict(torch.load(

@@ -5,7 +5,6 @@ Unit tests for data loading and sliding window logic.
 """
 
 import numpy as np
-import pytest
 import sys
 from pathlib import Path
 
@@ -15,9 +14,7 @@ from src.data.loader import (
     _sliding_window,
     _compute_rul,
     _split_and_scale,
-    _cmapss_windows,
     TimeSeriesDataset,
-    make_dataloaders,
 )
 
 
@@ -113,9 +110,11 @@ class TestSplitAndScale:
         rul = np.arange(1000, dtype=np.float32)
         feature_names = [f"f{i}" for i in range(5)]
 
-        data = _split_and_scale(X, y, rul, feature_names,
-                                 val_split=0.15, test_split=0.15,
-                                 random_seed=42)
+        data = _split_and_scale(
+            X, y, rul, feature_names,
+            val_split=0.15, test_split=0.15,
+            random_seed=42,
+        )
 
         total = len(X)
         assert abs(len(data["X_train"]) / total - 0.70) < 0.05
@@ -128,9 +127,11 @@ class TestSplitAndScale:
         y = np.concatenate([np.zeros(400), np.ones(100)])
         rul = np.arange(500, dtype=np.float32)
 
-        data = _split_and_scale(X, y, rul, ["f0", "f1", "f2"],
-                                 val_split=0.15, test_split=0.15,
-                                 random_seed=42)
+        data = _split_and_scale(
+            X, y, rul, ["f0", "f1", "f2"],
+            val_split=0.15, test_split=0.15,
+            random_seed=42,
+        )
 
         # Training data should be approximately zero-mean, unit-variance
         train_mean = data["X_train"][data["y_train"] == 0].mean()

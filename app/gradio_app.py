@@ -30,8 +30,13 @@ import os
 
 sys.path.insert(0, os.path.abspath(".."))
 
-from src.data.synthetic_generator import generate_esp_dataset, SYNTHETIC_SENSOR_COLS
-from src.data.loader import _sliding_window, _compute_rul, _split_and_scale
+from src.data.synthetic_generator import (
+    SYNTHETIC_SENSOR_COLS,
+    _inject_gas_locking,
+    _inject_abrasive_wear,
+    _inject_motor_overheating,
+    _inject_scale_buildup,
+)
 from src.models.lstm_autoencoder import LSTMAutoencoder, mc_dropout_anomaly_scores
 from src.models.rul_predictor import RULPredictor
 
@@ -89,8 +94,9 @@ LSTM_MODEL, RUL_MODEL = _load_or_build_demo_models()
 
 def generate_demo_well(failure_mode: str, n_steps: int = 500):
     """Generate a synthetic well for live demo."""
-    from src.data.synthetic_generator import generate_esp_dataset
-    df = generate_esp_dataset(
+    from src.data.synthetic_generator import generate_esp_dataset as _gen
+
+    df = _gen(
         n_wells=1,
         timesteps_per_well=n_steps,
         failure_prob=0.0 if failure_mode == "normal" else 1.0,
@@ -98,10 +104,6 @@ def generate_demo_well(failure_mode: str, n_steps: int = 500):
     )
     # Patch failure mode if specified
     if failure_mode != "normal":
-        from src.data.synthetic_generator import (
-            _inject_gas_locking, _inject_abrasive_wear,
-            _inject_motor_overheating, _inject_scale_buildup
-        )
         rng = np.random.default_rng(42)
         failure_start = int(n_steps * 0.6)
         signals = {col: df[col].values.copy() for col in SENSOR_COLS}
@@ -121,21 +123,24 @@ def generate_demo_well(failure_mode: str, n_steps: int = 500):
                 signals["vibration_x_g"], signals["vibration_y_g"],
                 signals["intake_pressure_psi"], failure_start, n_steps, rng
             )
-            df["vibration_x_g"] = vx; df["vibration_y_g"] = vy
+            df["vibration_x_g"] = vx
+            df["vibration_y_g"] = vy
             df["intake_pressure_psi"] = ip
         elif failure_mode == "motor_overheating":
             curr, temp, res = _inject_motor_overheating(
                 signals["motor_current_A"], signals["motor_temperature_C"],
                 signals["winding_resistance_ohm"], failure_start, n_steps, rng
             )
-            df["motor_current_A"] = curr; df["motor_temperature_C"] = temp
+            df["motor_current_A"] = curr
+            df["motor_temperature_C"] = temp
             df["winding_resistance_ohm"] = res
         elif failure_mode == "scale_buildup":
             dp, fl = _inject_scale_buildup(
                 signals["discharge_pressure_psi"], signals["flow_rate_bpd"],
                 failure_start, n_steps, rng
             )
-            df["discharge_pressure_psi"] = dp; df["flow_rate_bpd"] = fl
+            df["discharge_pressure_psi"] = dp
+            df["flow_rate_bpd"] = fl
 
         df["machine_status"] = np.where(df.index >= failure_start, "BROKEN", "NORMAL")
     return df
@@ -272,9 +277,10 @@ def predict_from_csv(file_obj):
         return None, (
             f"CSV must contain sensor columns. Expected: {SENSOR_COLS[:5]}...\n"
             f"Found: {list(df.columns)}\n\n"
-            "Tip: Use the synthetic data generator to produce a compatible CSV:\n"
+            "Tip: Generate compatible CSV with:\n"
             "  python -c \"from src.data.synthetic_generator import *; "
-            "df=generate_esp_dataset(); df.to_csv('my_data.csv',index=False)\""
+            "df = generate_esp_dataset(); "
+            "df.to_csv('my_data.csv', index=False)\""
         ), ""
 
     df[available] = df[available].ffill().fillna(0)

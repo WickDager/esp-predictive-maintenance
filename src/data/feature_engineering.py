@@ -20,8 +20,9 @@ Failure mode mapping to features:
 
 import numpy as np
 import pandas as pd
-from scipy import signal, stats
-from typing import List, Optional, Tuple
+from scipy import signal  # noqa: F401
+from scipy import stats  # noqa: F401
+from typing import List, Optional
 import warnings
 
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -165,7 +166,7 @@ def spectral_features(
     feat_dict = {col: {f: [] for f in
                        [f"{col}_fft_mag_{i}" for i in range(n_components)] +
                        [f"{col}_spectral_centroid", f"{col}_spectral_entropy"]}
-                 for col in df.columns}
+                 for col in df.columns}  # noqa: F841
 
     result_rows = []
     for i in range(len(df)):

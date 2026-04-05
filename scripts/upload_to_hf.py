@@ -20,11 +20,7 @@ Requirements:
 
 import argparse
 import os
-import json
-from pathlib import Path
-
-from huggingface_hub import HfApi, create_repo, upload_folder
-from huggingface_hub import HfApi
+from huggingface_hub import create_repo, upload_folder
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -225,7 +221,6 @@ def upload_model_to_hf(
       2. Writes the model card (README.md) into model_dir
       3. Uploads all files in model_dir
     """
-    api = HfApi(token=token)
     repo_id = f"{hf_username}/{repo_name}"
 
     print(f"\n{'='*60}")

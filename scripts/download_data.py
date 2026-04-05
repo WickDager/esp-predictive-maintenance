@@ -21,7 +21,6 @@ Usage:
 """
 
 import argparse
-import os
 import sys
 import zipfile
 import subprocess
@@ -95,7 +94,9 @@ def download_cmapss():
     except Exception as e:
         print(f"\nPrimary download failed: {e}")
         print("Alternative: Download manually from")
-        print("  https://www.nasa.gov/intelligent-systems-division/discovery-and-systems-health/pcoe/pcoe-data-set-repository/")
+        base = "https://www.nasa.gov/intelligent-systems-division/"
+        print(f"  {base}discovery-and-systems-health/pcoe/")
+        print("  pcoe-data-set-repository/")
         print("  Then extract to data/raw/cmapss/")
         return
 
@@ -128,7 +129,7 @@ def download_synthetic(n_wells: int = 50, timesteps: int = 5000, seed: int = 42)
     out_path = RAW_DIR / "synthetic_esp.csv"
     df.to_csv(out_path, index=False)
     print(f"✓ Generated {len(df):,} rows → {out_path}")
-    print(f"  Failure rate: {(df['machine_status']=='BROKEN').mean():.1%}")
+    print(f"  Failure rate: {(df['machine_status'] == 'BROKEN').mean():.1%}")
     print("  Failure modes:", df["failure_mode"].unique().tolist())
 
 

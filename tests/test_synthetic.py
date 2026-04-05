@@ -14,7 +14,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.data.synthetic_generator import (
     generate_esp_dataset,
     SYNTHETIC_SENSOR_COLS,
-    _simulate_well,
     _inject_gas_locking,
     _inject_abrasive_wear,
     _inject_motor_overheating,
@@ -51,8 +50,11 @@ class TestGenerateESPDataset:
         """All failure modes should be representable."""
         modes = set()
         for _ in range(100):
-            df = generate_esp_dataset(n_wells=10, timesteps_per_well=100,
-                                       failure_prob=1.0, random_seed=np.random.randint(0, 10000))
+            df = generate_esp_dataset(
+                n_wells=10, timesteps_per_well=100,
+                failure_prob=1.0,
+                random_seed=np.random.randint(0, 10000),
+            )
             modes.update(df["failure_mode"].unique())
         # Should see all 4 failure modes across many runs
         expected = {"gas_locking", "abrasive_wear", "motor_overheating", "scale_buildup"}
@@ -60,8 +62,10 @@ class TestGenerateESPDataset:
 
     def test_normal_wells(self):
         """Wells with failure_prob=0 should all be NORMAL."""
-        df = generate_esp_dataset(n_wells=5, timesteps_per_well=100,
-                                   failure_prob=0.0, random_seed=42)
+        df = generate_esp_dataset(
+            n_wells=5, timesteps_per_well=100,
+            failure_prob=0.0, random_seed=42,
+        )
         assert (df["machine_status"] == "NORMAL").all()
         assert (df["failure_mode"] == "normal").all()
 
@@ -76,8 +80,12 @@ class TestGenerateESPDataset:
 
     def test_reproducibility(self):
         """Same seed should produce same data."""
-        df1 = generate_esp_dataset(n_wells=3, timesteps_per_well=200, random_seed=123)
-        df2 = generate_esp_dataset(n_wells=3, timesteps_per_well=200, random_seed=123)
+        df1 = generate_esp_dataset(
+            n_wells=3, timesteps_per_well=200, random_seed=123,
+        )
+        df2 = generate_esp_dataset(
+            n_wells=3, timesteps_per_well=200, random_seed=123,
+        )
         for col in SYNTHETIC_SENSOR_COLS:
             np.testing.assert_array_equal(df1[col].values, df2[col].values)
 

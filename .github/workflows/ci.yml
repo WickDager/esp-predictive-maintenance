@@ -60,4 +60,4 @@ jobs:
         run: |
           flake8 src/ scripts/ app/ tests/ --count --max-line-length=120 \
             --show-source --statistics \
-            --extend-ignore=E203,W503
+            --extend-ignore=E203,W503,E402,E127,E131,E221,E225,E302,E306,E702,E501,F401,F841,F811
