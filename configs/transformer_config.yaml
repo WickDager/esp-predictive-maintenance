@@ -1,0 +1,17 @@
+# configs/transformer_config.yaml
+
+model:
+  name: "TransformerAutoencoder"
+  input_size: 52                # sensor channels
+  d_model: 128                  # embedding dimension
+  nhead: 8                      # attention heads
+  num_encoder_layers: 4
+  num_decoder_layers: 4
+  dim_feedforward: 256
+  dropout: 0.1
+  max_seq_len: 100              # max window length
+  positional_encoding: "learnable"  # learnable | sinusoidal
+
+anomaly:
+  threshold_percentile: 95
+  smoothing_window: 10

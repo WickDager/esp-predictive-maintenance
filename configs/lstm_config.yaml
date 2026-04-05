@@ -1,0 +1,15 @@
+# configs/lstm_config.yaml
+
+model:
+  name: "LSTMAutoencoder"
+  input_size: 52                # number of sensor channels (pump dataset)
+  hidden_size: 128
+  num_layers: 2
+  latent_size: 32
+  dropout: 0.3
+  bidirectional_encoder: true
+  teacher_forcing_ratio: 0.5   # for decoder during training
+
+anomaly:
+  threshold_percentile: 95     # reconstruction error percentile on normal data
+  smoothing_window: 10         # rolling window to smooth anomaly scores

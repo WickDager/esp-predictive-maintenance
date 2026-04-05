@@ -1,0 +1,52 @@
+# configs/training_config.yaml
+# Master training configuration for ESP Predictive Maintenance
+
+paths:
+  raw_data_dir: "data/raw"
+  processed_data_dir: "data/processed"
+  checkpoints_dir: "checkpoints"
+  logs_dir: "logs"
+  results_dir: "results"
+
+data:
+  dataset: "pump_sensor"          # pump_sensor | cmapss | synthetic
+  cmapss_subset: "FD001"          # FD001 | FD002 | FD003 | FD004
+  window_size: 50                 # timesteps per input window
+  step_size: 1                    # sliding window step
+  val_split: 0.15
+  test_split: 0.15
+  random_seed: 42
+  # Sensor columns to use (set null to use all)
+  sensor_cols: null
+  # Label column
+  label_col: "machine_status"
+  # Failure label value in dataset
+  failure_label: "BROKEN"
+
+training:
+  batch_size: 128
+  num_epochs: 100
+  early_stopping_patience: 15
+  gradient_clip: 1.0
+  num_workers: 4                  # DataLoader workers (set 0 for Colab)
+
+optimizer:
+  name: "AdamW"
+  lr: 0.001
+  weight_decay: 0.0001
+  betas: [0.9, 0.999]
+
+scheduler:
+  name: "CosineAnnealingWarmRestarts"
+  T_0: 20
+  T_mult: 2
+  eta_min: 0.00001
+
+uncertainty:
+  mc_dropout_samples: 50         # Number of forward passes for MC Dropout
+
+# HuggingFace upload settings
+huggingface:
+  username: "YOUR_HF_USERNAME"   # replace with your HF username
+  push_to_hub: false             # set true when ready to upload
+  private: false
