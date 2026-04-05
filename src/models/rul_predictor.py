@@ -203,12 +203,15 @@ class RULPredictor(nn.Module):
     def from_pretrained(cls, load_dir: str, device: str = "cpu") -> "RULPredictor":
         with open(os.path.join(load_dir, "config.json")) as f:
             config = json.load(f)
+        output_range = config.get("output_range")
+        if output_range is not None:
+            output_range = tuple(output_range)
         model = cls(
             input_size=config["input_size"],
             hidden_size=config["hidden_size"],
             num_layers=config.get("num_layers", 3),
             dropout=config.get("dropout", 0.3),
-            output_range=config.get("output_range"),
+            output_range=output_range,
         )
         model.load_state_dict(torch.load(
             os.path.join(load_dir, "pytorch_model.bin"),
