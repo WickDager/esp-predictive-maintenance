@@ -1,10 +1,12 @@
 import json
+import re
 
 NOTEBOOKS = [
     'notebooks/03_LSTM_Autoencoder.ipynb',
     'notebooks/04_Transformer_Anomaly_Detection.ipynb',
     'notebooks/05_RUL_Prediction.ipynb',
     'notebooks/06_Survival_Analysis.ipynb',
+    'notebooks/07_Model_Evaluation_and_SHAP.ipynb',
 ]
 
 CELL1_CODE = [
@@ -36,8 +38,73 @@ CELL1_CODE = [
 ]
 
 
+def fix_mojibake(text):
+    """Fix common mojibake patterns."""
+    
+    # Pattern 1: Fix sequences like "─њЏпёЏ" or "─њпё" that should be "──"
+    text = re.sub(r'\u2500[\u0452\u040f\u043f\u0451]+[\u0452\u040f\u043f\u0451]*', '\u2500\u2500', text)
+    
+    # Pattern 1.5: Fix "─→→" which should be just "→"
+    text = text.replace('\u2500\u2192\u2192', '\u2192')
+    text = text.replace('\u2500\u2192', '\u2192')
+    
+    # Pattern 2: Fix "→ђ" should be just "→"
+    text = text.replace('\u2192\u0452', '\u2192')
+    
+    # Pattern 3: Remove standalone mojibake comment markers
+    text = text.replace('\u0452\u040f\u043f\u0451\u040f', '')
+    text = text.replace('\u0452\u043f\u0451', '')
+    text = text.replace('\u040f', '')
+    text = text.replace('\u0452', '')
+    text = text.replace('\u043f', '')
+    text = text.replace('\u0451', '')
+    text = text.replace('\u045a', '')
+    text = text.replace('\u040f', '')
+    text = text.replace('\u0453', '')  # ѓ (should be sigma or similar)
+    
+    # Pattern 4: Fix О and І (from notebook 06)
+    text = text.replace('\u041e', '')  # О (Cyrillic O)
+    text = text.replace('\u0406', '')  # І (Cyrillic I)
+    text = text.replace('\u041f', '')  # П (Cyrillic Pe)
+    text = text.replace('\u0433', '')  # г (Cyrlic ghe)
+    
+    # Pattern 5: Fix common broken box-drawing sequences
+    box_fixes = {
+        '\u0432\u201e\u0402': '\u2500',  # ─
+        '\u0432\u201d\u201a': '\u2502',  # │
+        '\u0432\u201d\u0153': '\u251c',  # ├
+        '\u0432\u201d\u00a4': '\u2524',  # ┤
+        '\u0432\u201d\u00ac': '\u252c',  # ┬
+        '\u0432\u201d\u00b4': '\u2534',  # ┴
+        '\u0432\u201d\u00bc': '\u253c',  # ┼
+        '\u0432\u2022\u0161': '\u2554',  # ╔
+        '\u0432\u2022\u2014': '\u2557',  # ╗
+        '\u0432\u2022\u0161': '\u255a',  # ╚
+        '\u0432\u2022\u0097': '\u255d',  # ╝
+        '\u0432\u2022\u00a6': '\u2566',  # ╦
+        '\u0432\u2022\u00a9': '\u2569',  # ╩
+        '\u0432\u2022\u00ac': '\u256c',  # ╬
+    }
+    
+    for broken, correct in box_fixes.items():
+        text = text.replace(broken, correct)
+    
+    # Pattern 6: Fix arrows
+    arrow_fixes = {
+        '\u0432\u2020\u2019': '\u2192',  # →
+        '\u0432\u2020\u201d': '\u2193',  # ↓
+        '\u0432\u2020\u0091': '\u2191',  # ↑
+        '\u0432\u2020\u201c': '\u2190',  # ←
+    }
+    
+    for broken, correct in arrow_fixes.items():
+        text = text.replace(broken, correct)
+    
+    return text
+
+
 def fix_notebook(path):
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         nb = json.load(f)
 
     # Find the first code cell (Cell 1)
@@ -54,29 +121,47 @@ def fix_notebook(path):
     # Replace Cell 1
     nb['cells'][cell_idx]['source'] = CELL1_CODE
 
-    # Fix sys.path to use current directory instead of parent
+    # Fix all cell contents
+    cells_fixed = 0
     for cell in nb['cells']:
+        original_source = cell['source'][:]
+        # Fix mojibake in all lines
+        for j, line in enumerate(cell['source']):
+            cell['source'][j] = fix_mojibake(line)
+        
+        # Fix sys.path to use current directory instead of parent
         for j, line in enumerate(cell['source']):
             if "sys.path.insert" in line and ".." in line:
                 cell['source'][j] = line.replace('os.path.abspath("..")', 'os.path.abspath(".")')
-            if "sys.path.insert" in line and ".." in line:
                 cell['source'][j] = line.replace("os.path.abspath('..')", 'os.path.abspath(".")')
-
-    # Fix all '../results/' to 'results/'
-    for cell in nb['cells']:
+        
+        # Fix all '../results/' to 'results/'
         for j, line in enumerate(cell['source']):
             if '../results/' in line:
                 cell['source'][j] = line.replace('../results/', 'results/')
             if '../checkpoints/' in line:
                 cell['source'][j] = line.replace('../checkpoints/', 'checkpoints/')
+        
+        if original_source != cell['source']:
+            cells_fixed += 1
 
-    with open(path, 'w') as f:
-        json.dump(nb, f, indent=1)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(nb, f, indent=1, ensure_ascii=False)
 
     # Verify
     cell1_text = ''.join(nb['cells'][cell_idx]['source'])
     print(f"  git clone: {'YES' if 'git clone' in cell1_text else 'NO'}")
-    print(f"  sys.path fix: checking...")
+    print(f"  Cells modified: {cells_fixed}")
+    
+    # Check for remaining mojibake
+    all_text = ''.join([''.join(cell['source']) for cell in nb['cells']])
+    cyrillic_count = len(re.findall(r'[\u0400-\u04FF]', all_text))
+    if cyrillic_count > 0:
+        print(f"  WARNING: {cyrillic_count} Cyrillic characters still present")
+        matches = re.findall(r'[\u0400-\u04FF]', all_text)
+        print(f"    Chars: {set(matches)}")
+    else:
+        print(f"  All mojibake fixed!")
 
 
 for nb_path in NOTEBOOKS:
