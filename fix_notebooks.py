@@ -22,21 +22,9 @@ CELL1_CODE = [
     "\n",
     "    !pip install -q torch torchvision tqdm scikit-learn\n",
     "\n",
-    "    # Try Google Drive, fall back to local if mount fails\n",
-    "    USE_DRIVE = False\n",
-    "    try:\n",
-    "        from google.colab import drive\n",
-    "        drive.mount('/content/drive', force_remount=True)\n",
-    "        SAVE_DIR = '/content/drive/MyDrive/esp_pm/checkpoints'\n",
-    "        os.makedirs(SAVE_DIR, exist_ok=True)\n",
-    "        USE_DRIVE = True\n",
-    "        print('Google Drive mounted successfully.')\n",
-    "    except Exception as e:\n",
-    "        print(f'Drive mount failed ({e}). Using local storage instead.')\n",
-    "        SAVE_DIR = '/content/checkpoints'\n",
-    "\n",
-    "    if not USE_DRIVE:\n",
-    "        SAVE_DIR = '/content/checkpoints'\n",
+    "    # Use LOCAL storage for training (reliable, no Drive I/O issues)\n",
+    "    # At the end, a final cell will copy everything to Google Drive\n",
+    "    SAVE_DIR = '/content/checkpoints'\n",
     "else:\n",
     "    SAVE_DIR = 'checkpoints'\n",
     "\n",
@@ -49,6 +37,44 @@ CELL1_CODE = [
     "print(f'Device: {DEVICE}')\n",
     "if torch.cuda.is_available():\n",
     "    print(f'GPU: {torch.cuda.get_device_name(0)}')\n",
+]
+
+DRIVE_SYNC_CELL = [
+    "# -- Save results to Google Drive -------------------------------------------\n",
+    "import sys, os, shutil\n",
+    "\n",
+    "if 'google.colab' not in sys.modules:\n",
+    "    print('Not running in Colab. No Drive sync needed.')\n",
+    "else:\n",
+    "    from google.colab import drive\n",
+    "    drive.mount('/content/drive')\n",
+    "\n",
+    "    DRIVE_DIR = '/content/drive/MyDrive/esp_pm'\n",
+    "    os.makedirs(f'{DRIVE_DIR}/checkpoints', exist_ok=True)\n",
+    "    os.makedirs(f'{DRIVE_DIR}/results', exist_ok=True)\n",
+    "\n",
+    "    # Copy checkpoints\n",
+    "    if os.path.exists('checkpoints'):\n",
+    "        for f in os.listdir('checkpoints'):\n",
+    "            src = os.path.join('checkpoints', f)\n",
+    "            dst = f'{DRIVE_DIR}/checkpoints/{f}'\n",
+    "            shutil.copy2(src, dst)\n",
+    "            print(f'  Copied: checkpoints/{f}')\n",
+    "\n",
+    "    # Copy results\n",
+    "    if os.path.exists('results'):\n",
+    "        for f in os.listdir('results'):\n",
+    "            src = os.path.join('results', f)\n",
+    "            dst = f'{DRIVE_DIR}/results/{f}'\n",
+    "            shutil.copy2(src, dst)\n",
+    "            print(f'  Copied: results/{f}')\n",
+    "\n",
+    "    # Copy training log\n",
+    "    if os.path.exists(f'{SAVE_DIR}/training_log.csv'):\n",
+    "        shutil.copy2(f'{SAVE_DIR}/training_log.csv', f'{DRIVE_DIR}/checkpoints/training_log.csv')\n",
+    "        print(f'  Copied: training_log.csv')\n",
+    "\n",
+    "    print(f'\\nAll files synced to: {DRIVE_DIR}')\n",
 ]
 
 
@@ -161,6 +187,23 @@ def fix_notebook(path):
 
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(nb, f, indent=1, ensure_ascii=False)
+
+    # Add Drive sync cell at the end (if not already present)
+    has_sync_cell = any(
+        'Save results to Google Drive' in ''.join(cell.get('source', ''))
+        for cell in nb['cells']
+    )
+    if not has_sync_cell:
+        nb['cells'].append({
+            'cell_type': 'code',
+            'execution_count': None,
+            'metadata': {},
+            'outputs': [],
+            'source': DRIVE_SYNC_CELL,
+        })
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(nb, f, indent=1, ensure_ascii=False)
+        print('  Added Drive sync cell at the end.')
 
     # Verify
     cell1_text = ''.join(nb['cells'][cell_idx]['source'])

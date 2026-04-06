@@ -358,11 +358,28 @@ def _split_and_scale(
     normal_mask = y_train == 0
     n_train, seq_len, n_feat = X_train.shape
     scaler = StandardScaler()
-    scaler.fit(X_train[normal_mask].reshape(-1, n_feat))
+    train_normal = X_train[normal_mask].reshape(-1, n_feat)
+
+    # Safety check: ensure we have enough normal samples
+    if len(train_normal) == 0:
+        raise ValueError(
+            f"No normal (non-failure) samples in training set. "
+            f"Cannot fit scaler. y_train distribution: {np.unique(y_train, return_counts=True)}"
+        )
+
+    scaler.fit(train_normal)
+
+    # Clip scaler's scale_ to avoid division by near-zero (prevents NaN/Inf)
+    scaler.scale_ = np.clip(scaler.scale_, 1e-8, None)
 
     X_train = scaler.transform(X_train.reshape(-1, n_feat)).reshape(n_train, seq_len, n_feat)
     X_val = scaler.transform(X_val.reshape(-1, n_feat)).reshape(X_val.shape)
     X_test = scaler.transform(X_test.reshape(-1, n_feat)).reshape(X_test.shape)
+
+    # Final safety: replace any remaining NaN/Inf with clipped values
+    X_train = np.clip(np.nan_to_num(X_train, nan=0.0, posinf=10.0, neginf=-10.0), -10, 10)
+    X_val = np.clip(np.nan_to_num(X_val, nan=0.0, posinf=10.0, neginf=-10.0), -10, 10)
+    X_test = np.clip(np.nan_to_num(X_test, nan=0.0, posinf=10.0, neginf=-10.0), -10, 10)
 
     logger.info(
         f"Split: train={X_train.shape} (fail={y_train.mean():.3f}) | "

@@ -237,6 +237,11 @@ class AutoencoderTrainer:
                 break
 
         # Load best weights
+        if not os.path.exists(best_ckpt_path):
+            logger.warning(f"No checkpoint saved at {best_ckpt_path}. Training may have diverged (NaN losses).")
+            logger.warning("Returning history without loading best model.")
+            return self.history
+
         checkpoint = torch.load(best_ckpt_path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         logger.info(f"Loaded best model from epoch {checkpoint['epoch']}")
