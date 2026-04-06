@@ -369,17 +369,17 @@ def _split_and_scale(
 
     scaler.fit(train_normal)
 
-    # Clip scaler's scale_ to avoid division by near-zero (prevents NaN/Inf)
-    scaler.scale_ = np.clip(scaler.scale_, 1e-8, None)
+    # Prevent division by near-zero (stops NaN/Inf when features have zero variance)
+    scaler.scale_ = np.clip(scaler.scale_, 1e-6, None)
 
     X_train = scaler.transform(X_train.reshape(-1, n_feat)).reshape(n_train, seq_len, n_feat)
     X_val = scaler.transform(X_val.reshape(-1, n_feat)).reshape(X_val.shape)
     X_test = scaler.transform(X_test.reshape(-1, n_feat)).reshape(X_test.shape)
 
-    # Final safety: replace any remaining NaN/Inf with clipped values
-    X_train = np.clip(np.nan_to_num(X_train, nan=0.0, posinf=10.0, neginf=-10.0), -10, 10)
-    X_val = np.clip(np.nan_to_num(X_val, nan=0.0, posinf=10.0, neginf=-10.0), -10, 10)
-    X_test = np.clip(np.nan_to_num(X_test, nan=0.0, posinf=10.0, neginf=-10.0), -10, 10)
+    # Clip to prevent extreme values from distribution shift between train/val
+    X_train = np.clip(X_train, -10, 10)
+    X_val = np.clip(X_val, -10, 10)
+    X_test = np.clip(X_test, -10, 10)
 
     logger.info(
         f"Split: train={X_train.shape} (fail={y_train.mean():.3f}) | "

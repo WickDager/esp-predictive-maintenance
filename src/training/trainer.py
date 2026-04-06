@@ -105,8 +105,8 @@ class AutoencoderTrainer:
         self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=weight_decay
         )
-        self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            self.optimizer, T_0=scheduler_T0, T_mult=2, eta_min=1e-5
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode="min", factor=0.5, patience=5, min_lr=1e-5
         )
         self.early_stopper = EarlyStopping(patience=early_stopping_patience)
         self.criterion = nn.MSELoss()
@@ -203,7 +203,7 @@ class AutoencoderTrainer:
             current_lr = self.optimizer.param_groups[0]["lr"]
             elapsed = time.time() - t0
 
-            self.scheduler.step()
+            self.scheduler.step(val_loss)
             # Decay teacher forcing ratio (curriculum learning)
             self.teacher_forcing_ratio = max(
                 0.0, self.teacher_forcing_ratio - self.teacher_forcing_decay

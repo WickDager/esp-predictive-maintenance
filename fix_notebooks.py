@@ -49,6 +49,102 @@ CELL1_CODE = [
     "    print(f'GPU: {torch.cuda.get_device_name(0)}')\n",
 ]
 
+# Improved configs: smaller model, more regularization, real data default, step_size=2
+LSTM_CONFIG = [
+    "# ── Cell 3: Hyperparameters ─\n",
+    "# ──  Tune these!\n",
+    "CONFIG = {\n",
+    "    # Data\n",
+    "    'window_size':    50,     # timesteps per input window\n",
+    "    'step_size':       2,     # sliding window step (reduced overlap)\n",
+    "    'val_split':    0.15,\n",
+    "    'test_split':   0.15,\n",
+    "\n",
+    "    # Model\n",
+    "    'hidden_size':    64,     # reduced from 128 to prevent memorization\n",
+    "    'num_layers':      2,\n",
+    "    'latent_size':    32,\n",
+    "    'dropout':       0.5,     # increased from 0.3 for regularization\n",
+    "\n",
+    "    # Training\n",
+    "    'batch_size':    128,\n",
+    "    'num_epochs':    100,\n",
+    "    'lr':           1e-3,\n",
+    "    'weight_decay': 1e-3,     # increased from 1e-4 for stronger L2\n",
+    "    'patience':       20,     # increased from 15\n",
+    "    'gradient_clip': 1.0,\n",
+    "\n",
+    "    # Anomaly detection\n",
+    "    'threshold_pct': 95,      # calibration percentile on normal windows\n",
+    "    'mc_samples':     50,     # MC Dropout forward passes\n",
+    "}\n",
+    "\n",
+    "print('CONFIG:')\n",
+    "for k, v in CONFIG.items():\n",
+    "    print(f'  {k:20s}: {v}')\n",
+]
+
+LSTM_DATA_CELL = [
+    "# ── Cell 4: Load & prepare data ─\n",
+    "# ──  CHOOSE YOUR DATA SOURCE\n",
+    "# Option A: Synthetic (generated on the fly)\n",
+    "# Option B: Real Pump Sensor CSV from Google Drive\n",
+    "\n",
+    "USE_REAL_DATA = True   # → True to load from Drive (default)\n",
+    "\n",
+    "if USE_REAL_DATA:\n",
+    "    # ── Real Pump Sensor Data from Drive ─\n",
+    "    # Expected CSV: sensor.csv from Kaggle pump-sensor-data\n",
+    "    # Has columns: timestamp, sensor_00, ..., sensor_51, machine_status\n",
+    "    DRIVE_CSV_PATH = '/content/drive/MyDrive/pump_sensor.csv'  # → change if needed\n",
+    "    print(f'Loading real data from {DRIVE_CSV_PATH}...')\n",
+    "\n",
+    "    raw_df = pd.read_csv(DRIVE_CSV_PATH, parse_dates=['timestamp'])\n",
+    "    raw_df = raw_df.sort_values('timestamp').reset_index(drop=True)\n",
+    "\n",
+    "    # Detect sensor columns (sensor_XX pattern)\n",
+    "    SENSOR_COLS = sorted([c for c in raw_df.columns if c.startswith('sensor_')])\n",
+    "    print(f'Found {len(SENSOR_COLS)} sensor columns')\n",
+    "\n",
+    "    # Forward-fill missing values, then fill remaining with 0\n",
+    "    raw_df[SENSOR_COLS] = raw_df[SENSOR_COLS].ffill().bfill()\n",
+    "\n",
+    "    # Binary failure label\n",
+    "    status_map = {'NORMAL': 0, 'RECOVERING': 0, 'BROKEN': 1}\n",
+    "    raw_df['failure'] = raw_df['machine_status'].map(status_map).fillna(0).astype(int)\n",
+    "    print(f'Raw data: {len(raw_df):,} rows, {len(SENSOR_COLS)} sensors')\n",
+    "    print(f'Failure rate: {raw_df[\"failure\"].mean()*100:.2f}%')\n",
+    "\n",
+    "else:\n",
+    "    # ── Synthetic Data ─\n",
+    "    from src.data.synthetic_generator import generate_esp_dataset, SYNTHETIC_SENSOR_COLS\n",
+    "    print('Generating synthetic ESP data...')\n",
+    "    raw_df = generate_esp_dataset(n_wells=40, timesteps_per_well=4000, random_seed=42)\n",
+    "    SENSOR_COLS = SYNTHETIC_SENSOR_COLS\n",
+    "    raw_df['failure'] = (raw_df['machine_status'] == 'BROKEN').astype(int)\n",
+    "    print(f'Raw data: {len(raw_df):,} rows, {len(SENSOR_COLS)} sensors')\n",
+    "\n",
+    "# Build sliding windows\n",
+    "from src.data.loader import _sliding_window, _compute_rul, _split_and_scale\n",
+    "\n",
+    "X_raw = raw_df[SENSOR_COLS].values.astype(np.float32)\n",
+    "y_raw = raw_df['failure'].values.astype(np.float32)\n",
+    "rul_raw = _compute_rul(y_raw)\n",
+    "\n",
+    "X_w, y_w, rul_w = _sliding_window(\n",
+    "    X_raw, y_raw, rul_raw,\n",
+    "    CONFIG['window_size'], CONFIG['step_size']\n",
+    ")\n",
+    "print(f'Windows: {X_w.shape}, failures: {y_w.sum():.0f} ({y_w.mean()*100:.2f}%)')\n",
+    "\n",
+    "data = _split_and_scale(\n",
+    "    X_w, y_w, rul_w, SENSOR_COLS,\n",
+    "    val_split=CONFIG['val_split'],\n",
+    "    test_split=CONFIG['test_split'],\n",
+    "    random_seed=42\n",
+    ")\n",
+]
+
 DRIVE_SYNC_CELL = [
     "# -- Save results to Google Drive -------------------------------------------\n",
     "import sys, os, shutil\n",
@@ -157,8 +253,22 @@ def fix_notebook(path):
     # Replace Cell 1
     nb['cells'][cell_idx]['source'] = CELL1_CODE
 
-    # Fix all cell contents
+    # Notebook 03 (LSTM): Also replace CONFIG and data loading cells
     cells_fixed = 0
+    if '03_LSTM' in path:
+        for i, cell in enumerate(nb['cells']):
+            src = ''.join(cell['source'])
+            # Replace CONFIG cell (has 'hidden_size': 128)
+            if cell['cell_type'] == 'code' and "'hidden_size':   128" in src:
+                nb['cells'][i]['source'] = LSTM_CONFIG
+                cells_fixed += 1
+            # Replace data loading cell (has USE_REAL_DATA = False)
+            if cell['cell_type'] == 'code' and 'USE_REAL_DATA = False' in src:
+                nb['cells'][i]['source'] = LSTM_DATA_CELL
+                cells_fixed += 1
+
+    # Fix all cell contents (mojibake + sys.path + paths)
+    cells_fixed_total = cells_fixed
     for cell in nb['cells']:
         original_source = cell['source'][:]
         # Fix mojibake in all lines
@@ -179,7 +289,7 @@ def fix_notebook(path):
                 cell['source'][j] = line.replace('../checkpoints/', 'checkpoints/')
         
         if original_source != cell['source']:
-            cells_fixed += 1
+            cells_fixed_total += 1
 
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(nb, f, indent=1, ensure_ascii=False)
@@ -205,7 +315,7 @@ def fix_notebook(path):
     cell1_text = ''.join(nb['cells'][cell_idx]['source'])
     print(f"  git clone: {'YES' if 'git clone' in cell1_text else 'NO'}")
     print(f"  Drive mount: {'YES' if 'drive.mount' in cell1_text else 'NO'}")
-    print(f"  Cells modified: {cells_fixed}")
+    print(f"  Cells modified: {cells_fixed_total}")
     
     # Check for remaining mojibake
     all_text = ''.join([''.join(cell['source']) for cell in nb['cells']])
