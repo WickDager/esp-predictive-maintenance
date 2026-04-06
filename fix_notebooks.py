@@ -22,10 +22,20 @@ CELL1_CODE = [
     "\n",
     "    !pip install -q torch torchvision tqdm scikit-learn\n",
     "\n",
-    "    # Use LOCAL storage for training (reliable, no Drive I/O issues)\n",
-    "    # At the end, a final cell will copy everything to Google Drive\n",
+    "    # Mount Drive (needed if you want to load real data from Drive)\n",
+    "    DRIVE_MOUNTED = False\n",
+    "    try:\n",
+    "        from google.colab import drive\n",
+    "        drive.mount('/content/drive')\n",
+    "        DRIVE_MOUNTED = True\n",
+    "        print('Google Drive mounted.')\n",
+    "    except Exception as e:\n",
+    "        print(f'Drive mount skipped/failed: {e}. Using local-only mode.')\n",
+    "\n",
+    "    # Always save checkpoints locally (avoids Drive I/O issues during training)\n",
     "    SAVE_DIR = '/content/checkpoints'\n",
     "else:\n",
+    "    DRIVE_MOUNTED = False\n",
     "    SAVE_DIR = 'checkpoints'\n",
     "\n",
     "os.makedirs(SAVE_DIR, exist_ok=True)\n",
@@ -92,49 +102,35 @@ def fix_mojibake(text):
     text = text.replace('\u2192\u0452', '\u2192')
     
     # Pattern 3: Remove standalone mojibake comment markers
-    text = text.replace('\u0452\u040f\u043f\u0451\u040f', '')
-    text = text.replace('\u0452\u043f\u0451', '')
-    text = text.replace('\u040f', '')
-    text = text.replace('\u0452', '')
-    text = text.replace('\u043f', '')
-    text = text.replace('\u0451', '')
-    text = text.replace('\u045a', '')
-    text = text.replace('\u040f', '')
-    text = text.replace('\u0453', '')  # ѓ (should be sigma or similar)
+    for ch in ['\u0452', '\u040f', '\u043f', '\u0451', '\u045a', '\u0453', '\u041f', '\u0433', '\u041e', '\u0406']:
+        text = text.replace(ch, '')
     
-    # Pattern 4: Fix О and І (from notebook 06)
-    text = text.replace('\u041e', '')  # О (Cyrillic O)
-    text = text.replace('\u0406', '')  # І (Cyrillic I)
-    text = text.replace('\u041f', '')  # П (Cyrillic Pe)
-    text = text.replace('\u0433', '')  # г (Cyrlic ghe)
-    
-    # Pattern 5: Fix common broken box-drawing sequences
+    # Pattern 4: Fix common broken box-drawing sequences
     box_fixes = {
-        '\u0432\u201e\u0402': '\u2500',  # ─
-        '\u0432\u201d\u201a': '\u2502',  # │
-        '\u0432\u201d\u0153': '\u251c',  # ├
-        '\u0432\u201d\u00a4': '\u2524',  # ┤
-        '\u0432\u201d\u00ac': '\u252c',  # ┬
-        '\u0432\u201d\u00b4': '\u2534',  # ┴
-        '\u0432\u201d\u00bc': '\u253c',  # ┼
-        '\u0432\u2022\u0161': '\u2554',  # ╔
-        '\u0432\u2022\u2014': '\u2557',  # ╗
-        '\u0432\u2022\u0161': '\u255a',  # ╚
-        '\u0432\u2022\u0097': '\u255d',  # ╝
-        '\u0432\u2022\u00a6': '\u2566',  # ╦
-        '\u0432\u2022\u00a9': '\u2569',  # ╩
-        '\u0432\u2022\u00ac': '\u256c',  # ╬
+        '\u0432\u201e\u0402': '\u2500',
+        '\u0432\u201d\u201a': '\u2502',
+        '\u0432\u201d\u0153': '\u251c',
+        '\u0432\u201d\u00a4': '\u2524',
+        '\u0432\u201d\u00ac': '\u252c',
+        '\u0432\u201d\u00b4': '\u2534',
+        '\u0432\u201d\u00bc': '\u253c',
+        '\u0432\u2022\u0161': '\u2554',
+        '\u0432\u2022\u2014': '\u2557',
+        '\u0432\u2022\u0097': '\u255d',
+        '\u0432\u2022\u00a6': '\u2566',
+        '\u0432\u2022\u00a9': '\u2569',
+        '\u0432\u2022\u00ac': '\u256c',
     }
     
     for broken, correct in box_fixes.items():
         text = text.replace(broken, correct)
     
-    # Pattern 6: Fix arrows
+    # Pattern 5: Fix arrows
     arrow_fixes = {
-        '\u0432\u2020\u2019': '\u2192',  # →
-        '\u0432\u2020\u201d': '\u2193',  # ↓
-        '\u0432\u2020\u0091': '\u2191',  # ↑
-        '\u0432\u2020\u201c': '\u2190',  # ←
+        '\u0432\u2020\u2019': '\u2192',
+        '\u0432\u2020\u201d': '\u2193',
+        '\u0432\u2020\u0091': '\u2191',
+        '\u0432\u2020\u201c': '\u2190',
     }
     
     for broken, correct in arrow_fixes.items():
@@ -208,6 +204,7 @@ def fix_notebook(path):
     # Verify
     cell1_text = ''.join(nb['cells'][cell_idx]['source'])
     print(f"  git clone: {'YES' if 'git clone' in cell1_text else 'NO'}")
+    print(f"  Drive mount: {'YES' if 'drive.mount' in cell1_text else 'NO'}")
     print(f"  Cells modified: {cells_fixed}")
     
     # Check for remaining mojibake
